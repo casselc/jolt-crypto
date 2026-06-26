@@ -59,6 +59,13 @@
     (check "SHA-256(abc) matches NIST vector"
            (= hex "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")))
 
+  ;; MD5 of "abc" — known vector 900150983cd24fb0d6963f7d28e17f72
+  (let [md (MessageDigest/getInstance "MD5")
+        d  (.digest md (byte-array (map int "abc")))
+        hex (apply str (map #(format "%02x" (bit-and % 0xff)) (seq d)))]
+    (check "MD5(abc) matches known vector"
+           (= hex "900150983cd24fb0d6963f7d28e17f72")))
+
   (if (zero? @failures)
     (println "\nALL CRYPTO TESTS PASSED")
     (do (println "\n" @failures "FAILURES") (System/exit 1))))

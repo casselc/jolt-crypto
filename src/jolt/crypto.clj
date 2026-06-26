@@ -5,7 +5,7 @@
 
     Cipher        AES/CBC/PKCS5Padding (128/192/256, key length picks the variant)
     Mac           HmacSHA256 / HmacSHA1
-    MessageDigest SHA-256 / SHA-1
+    MessageDigest SHA-256 / SHA-1 / MD5
     SecureRandom  RAND_bytes
     SecretKeySpec / IvParameterSpec   key + IV holders
 
@@ -25,6 +25,7 @@
 (ffi/defcfn c-aes128   "EVP_aes_128_cbc"     [] :pointer)
 (ffi/defcfn c-aes192   "EVP_aes_192_cbc"     [] :pointer)
 (ffi/defcfn c-aes256   "EVP_aes_256_cbc"     [] :pointer)
+(ffi/defcfn c-md5      "EVP_md5"             [] :pointer)
 (ffi/defcfn c-sha1     "EVP_sha1"            [] :pointer)
 (ffi/defcfn c-sha256   "EVP_sha256"          [] :pointer)
 (ffi/defcfn c-ctx-new  "EVP_CIPHER_CTX_new"  [] :pointer)
@@ -113,6 +114,7 @@
     (throw (ex-info (str "unsupported Mac algorithm: " algo) {:algo algo}))))
 (defn- digest-spec [algo]
   (case (str algo) ("SHA-256" "SHA256") [c-sha256 32] ("SHA-1" "SHA1") [c-sha1 20]
+    ("MD5") [c-md5 16]
     (throw (ex-info (str "unsupported MessageDigest algorithm: " algo) {:algo algo}))))
 
 ;; --- host-class shims -------------------------------------------------------
