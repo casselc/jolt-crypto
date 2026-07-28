@@ -1,7 +1,8 @@
 (ns jolt.crypto-test
   "Drives the shims through the javax.crypto / java.security surface, exactly the
   way ring-core's session-cookie store does."
-  (:require [jolt.crypto]))
+  (:require [jolt.bytes :as bytes]
+            [jolt.crypto]))
 
 (import '[javax.crypto Cipher Mac])
 (import '[javax.crypto.spec SecretKeySpec IvParameterSpec])
@@ -11,6 +12,13 @@
 (defn- check [label ok?] (println (if ok? "ok  " "FAIL") label) (when-not ok? (swap! failures inc)))
 
 (defn- ba= [a b] (= (seq a) (seq b)))
+
+(defn- byte-window
+  "Put `body` behind non-empty sentinels so every consumer must respect the
+  selected Window rather than accidentally hashing or encrypting its parent."
+  [body]
+  (let [backing (byte-array (concat [99] body [100]))]
+    (bytes/window backing 1 (inc (count body)))))
 
 (defn- encrypt [key data]
   (let [iv (byte-array (repeatedly 16 #(rand-int 256)))
@@ -65,6 +73,45 @@
         hex (apply str (map #(format "%02x" (bit-and % 0xff)) (seq d)))]
     (check "MD5(abc) matches known vector"
            (= hex "900150983cd24fb0d6963f7d28e17f72")))
+
+  ;; jolt.bytes Window is a portable byte-region input without becoming a
+  ;; runtime dependency of jolt-crypto. All three Java-compatible entry points
+  ;; already coerce Seqable binary input through byte-array. Offset sentinels
+  ;; prove that only the selected window reaches OpenSSL.
+  (let [key-bytes (range 16)
+        iv-bytes (range 16 32)
+        msg-bytes (map int "windowed crypto input")
+        key-window (byte-window key-bytes)
+        iv-window (byte-window iv-bytes)
+        msg-window (byte-window msg-bytes)
+        cipher (Cipher/getInstance "AES/CBC/PKCS5Padding")
+        _ (.init cipher
+                 Cipher/ENCRYPT_MODE
+                 (SecretKeySpec. key-window "AES")
+                 (IvParameterSpec. iv-window))
+        ciphertext (.doFinal cipher msg-window)
+        ciphertext-window (byte-window (seq ciphertext))
+        decipher (Cipher/getInstance "AES/CBC/PKCS5Padding")
+        _ (.init decipher
+                 Cipher/DECRYPT_MODE
+                 (SecretKeySpec. key-window "AES")
+                 (IvParameterSpec. iv-window))
+        plaintext (.doFinal decipher ciphertext-window)
+        mac-window (let [m (Mac/getInstance "HmacSHA256")]
+                     (.init m (SecretKeySpec. key-window "HmacSHA256"))
+                     (.doFinal m msg-window))
+        mac-array (let [m (Mac/getInstance "HmacSHA256")]
+                    (.init m (SecretKeySpec. (byte-array key-bytes) "HmacSHA256"))
+                    (.doFinal m (byte-array msg-bytes)))
+        digest-window (.digest (MessageDigest/getInstance "SHA-256") msg-window)
+        digest-array (.digest (MessageDigest/getInstance "SHA-256")
+                              (byte-array msg-bytes))]
+    (check "AES consumes only the selected byte windows"
+           (ba= (byte-array msg-bytes) plaintext))
+    (check "HMAC over a byte window matches its materialized bytes"
+           (ba= mac-array mac-window))
+    (check "MessageDigest over a byte window matches its materialized bytes"
+           (ba= digest-array digest-window)))
 
   (if (zero? @failures)
     (println "\nALL CRYPTO TESTS PASSED")

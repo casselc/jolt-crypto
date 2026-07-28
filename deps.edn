@@ -15,6 +15,10 @@
                 :linux  ["libssl.so.3" "libssl.so.1.1" "libssl.so"]}]
 
  :aliases {:test {:extra-paths ["test"]
+                  :extra-deps
+                  {io.github.casselc/jolt-bytes
+                   {:git/url "https://github.com/casselc/jolt-bytes.git"
+                    :git/sha "c34b4d2275240a1efc7630f94cf97880cb905cc9"}}
                   :main-opts ["-m" "jolt.crypto-test"]}}
 
  :tasks {test "joltc -M:test"}}

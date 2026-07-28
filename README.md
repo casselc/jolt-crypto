@@ -39,3 +39,9 @@ one loaded copy (jolt.deps reconciles natives).
 ```
 joltc -M:test
 ```
+
+The local `codex/jolt-bytes-integration` branch also exercises sliced
+`jolt.bytes/Window` values through AES, HMAC, and MessageDigest. The dependency
+is test-only because the existing Java-compatible entry points already accept
+portable Seqable byte regions; see
+[`docs/BYTE-WINDOW-INTEGRATION.md`](docs/BYTE-WINDOW-INTEGRATION.md).
