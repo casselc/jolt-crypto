@@ -60,7 +60,9 @@ JOLT_AOT_CACHE=0 \
 /path/to/chez-10.4.1/bin/scheme --script host/chez/cli.ss -M:test
 ```
 
-The public `jolt-crypto` workflow still uses the latest released `joltc`.
-Hosted proof-stack evidence should wait until the required proposal-core
-semantics are in an upstream release or a writable downstream fork is
-explicitly selected.
+This branch is published in the writable `casselc/jolt-crypto` fork. The
+inherited workflow still downloads the latest released Linux `joltc`; even a
+green execution there would not establish the exact proposal-core proof stack
+or any non-Linux native-provider claim. Hosted proof-stack evidence therefore
+remains separate until this fork gains a source-runtime matrix pinned to the
+reviewed Jolt core.
