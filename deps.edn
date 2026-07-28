@@ -1,18 +1,20 @@
 {:paths ["src"]
 
- ;; OpenSSL (libcrypto for the symmetric primitives here; libssl so dependents
- ;; that also do TLS — e.g. jolt-lang/http-client — get both from one place and
- ;; don't redeclare them). Declared :jolt/native so jolt loads them before this
- ;; namespace, where the foreign-fn bindings resolve at load. An app pulling both
- ;; this and http-client loads each library once — jolt.deps reconciles natives.
+ ;; Provider libraries are optional at graph startup: requiring jolt.crypto
+ ;; selects and requires the provider for the observed target, while an
+ ;; unrelated consumer can carry this library without aborting before namespace
+ ;; loading. OpenSSL serves POSIX and Windows CNG ships in bcrypt.dll. libssl is
+ ;; intentionally not owned here; TLS consumers declare it themselves.
  :jolt/native [{:name "crypto"
+                :optional true
                 :darwin ["/opt/homebrew/opt/openssl@3/lib/libcrypto.dylib"
+                         "/opt/homebrew/lib/libcrypto.dylib"
+                         "/usr/local/opt/openssl@3/lib/libcrypto.dylib"
                          "/usr/lib/libcrypto.dylib" "libcrypto.dylib"]
                 :linux  ["libcrypto.so.3" "libcrypto.so.1.1" "libcrypto.so"]}
-               {:name "ssl"
-                :darwin ["/opt/homebrew/opt/openssl@3/lib/libssl.dylib"
-                         "/usr/lib/libssl.dylib" "libssl.dylib"]
-                :linux  ["libssl.so.3" "libssl.so.1.1" "libssl.so"]}]
+               {:name "bcrypt"
+                :optional true
+                :windows ["bcrypt.dll"]}]
 
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps
