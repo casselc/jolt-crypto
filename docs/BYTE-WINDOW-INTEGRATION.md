@@ -37,15 +37,22 @@ All 13 crypto checks passed. The existing NIST/known-vector checks and AES
 round trips still passed.
 
 The platform-provider follow-on expands this to 26 checks. The same
-sentinel-guarded Window values now cross both implementations of the native
-handler contract:
+sentinel-guarded Window values cross both implementations of the native handler
+contract:
 
-- OpenSSL on local Linux x86_64; and
-- Windows CNG on native local Windows x86_64.
+- OpenSSL on Linux and macOS, x86_64 and aarch64; and
+- Windows CNG on native Windows x86_64 and ARM64.
 
-Both runs used exact Jolt core `46e1f74f`, official Chez 10.4.1, source mode,
-and an exact target assertion. CNG was selected on Windows even though the
-development machine also has an unrelated OpenSSL DLL installed with Git for
+Hosted run
+[`30377886592`](https://github.com/casselc/jolt-crypto/actions/runs/30377886592)
+passed all six jobs at exact source revision
+`00a3a9a23f49bf4cd02fd87aa11ee8c921b2a6f6`. Every lane used exact Jolt core
+`46e1f74f`, official Chez 10.4.1, source mode with the AOT cache disabled, and
+an exact target assertion. Each printed the selected provider and the complete
+four-operation handler set before all 26 checks passed.
+
+The native local Windows x86_64 run also selected CNG even though the
+development machine has an unrelated OpenSSL DLL installed with Git for
 Windows. That distinguishes provider selection from accidental symbol
 availability.
 
@@ -76,6 +83,6 @@ JOLT_AOT_CACHE=0 \
 This branch is published in the writable `casselc/jolt-crypto` fork. The
 inherited released-`joltc` workflow has been replaced with a source-runtime
 matrix pinned to the reviewed Jolt core. It covers Linux and macOS on x86_64
-and aarch64 plus native Windows x86_64 and ARM64. Hosted evidence remains
-pending until that workflow runs on the public branch; local results do not
-pre-claim the four unobserved hosted targets.
+and aarch64 plus native Windows x86_64 and ARM64. The six-lane hosted evidence
+above promotes all six from proposed to observed source-runtime coverage; it
+does not imply packaged-`joltc` or AOT coverage.

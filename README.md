@@ -56,4 +56,7 @@ portable Seqable byte regions; see
 The public integration workflow pins Jolt core
 `46e1f74fc14f29283586900ef4b98c45375c0500`, disables the AOT cache, asserts the
 observed target, and exercises the provider on Linux, macOS, Windows x86_64, and
-Windows ARM64 using official Chez Scheme 10.4.1.
+Windows ARM64 using official Chez Scheme 10.4.1. Hosted run
+[`30377886592`](https://github.com/casselc/jolt-crypto/actions/runs/30377886592)
+passed all six source-runtime lanes at
+`00a3a9a23f49bf4cd02fd87aa11ee8c921b2a6f6`.

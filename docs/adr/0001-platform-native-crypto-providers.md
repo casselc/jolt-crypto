@@ -73,6 +73,14 @@ Both providers run the same public suite:
 - exact target/provider selection; and
 - sentinel-guarded `jolt.bytes/Window` inputs through AES, HMAC, and digest.
 
+Hosted run
+[`30377886592`](https://github.com/casselc/jolt-crypto/actions/runs/30377886592)
+passed that contract at source revision
+`00a3a9a23f49bf4cd02fd87aa11ee8c921b2a6f6` on Linux x86_64/aarch64, macOS
+x86_64/arm64, and native Windows x86_64/ARM64. Each lane asserted official Chez
+10.4.1, exact Jolt core `46e1f74f`, its observed Jolt target, and the provider
+selected for that target.
+
 The tests use Jolt core
 `46e1f74fc14f29283586900ef4b98c45375c0500`, whose scoped
 `with-byte-array-pointer` primitive borrows non-empty byte arrays only for the
