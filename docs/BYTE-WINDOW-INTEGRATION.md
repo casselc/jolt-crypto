@@ -51,6 +51,16 @@ passed all six jobs at exact source revision
 an exact target assertion. Each printed the selected provider and the complete
 four-operation handler set before all 26 checks passed.
 
+The documentation-tip follow-up,
+[`30380719100`](https://github.com/casselc/jolt-crypto/actions/runs/30380719100),
+also passed all six jobs. Every target restored its Chez cache and skipped both
+the build and save steps; individual jobs completed in about 24–85 seconds
+instead of the cold run's 3–9 minutes. The checked-in restore/build/assert/save
+sequence therefore avoids repeat compilation within this repository. GitHub
+Actions caches remain repository-scoped, so eliminating the first build in
+each downstream repository requires a separately published, checksum-pinned
+toolchain archive rather than weaker cache keys.
+
 The native local Windows x86_64 run also selected CNG even though the
 development machine has an unrelated OpenSSL DLL installed with Git for
 Windows. That distinguishes provider selection from accidental symbol

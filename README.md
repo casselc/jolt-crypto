@@ -20,8 +20,9 @@ token machinery, so **ring-defaults** loads and runs on Jolt.
 
 ```clojure
 ;; deps.edn
-jolt-lang/jolt-crypto {:git/url "https://github.com/jolt-lang/jolt-crypto"
-                       :git/sha "..."}
+io.github.casselc/jolt-crypto
+{:git/url "https://github.com/casselc/jolt-crypto.git"
+ :git/sha "00a3a9a23f49bf4cd02fd87aa11ee8c921b2a6f6"}
 ```
 
 ```clojure
