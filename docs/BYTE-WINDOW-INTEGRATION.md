@@ -36,6 +36,19 @@ The gate was run in source mode against:
 All 13 crypto checks passed. The existing NIST/known-vector checks and AES
 round trips still passed.
 
+The platform-provider follow-on expands this to 26 checks. The same
+sentinel-guarded Window values now cross both implementations of the native
+handler contract:
+
+- OpenSSL on local Linux x86_64; and
+- Windows CNG on native local Windows x86_64.
+
+Both runs used exact Jolt core `46e1f74f`, official Chez 10.4.1, source mode,
+and an exact target assertion. CNG was selected on Windows even though the
+development machine also has an unrelated OpenSSL DLL installed with Git for
+Windows. That distinguishes provider selection from accidental symbol
+availability.
+
 The `jolt-bytes` Ansatz and exhaustive runtime evidence establishes the
 Window's bounded selection and traversal contract. This gate establishes that
 the crypto adapter observes that traversal contract at the FFI boundary. It
@@ -61,8 +74,8 @@ JOLT_AOT_CACHE=0 \
 ```
 
 This branch is published in the writable `casselc/jolt-crypto` fork. The
-inherited workflow still downloads the latest released Linux `joltc`; even a
-green execution there would not establish the exact proposal-core proof stack
-or any non-Linux native-provider claim. Hosted proof-stack evidence therefore
-remains separate until this fork gains a source-runtime matrix pinned to the
-reviewed Jolt core.
+inherited released-`joltc` workflow has been replaced with a source-runtime
+matrix pinned to the reviewed Jolt core. It covers Linux and macOS on x86_64
+and aarch64 plus native Windows x86_64 and ARM64. Hosted evidence remains
+pending until that workflow runs on the public branch; local results do not
+pre-claim the four unobserved hosted targets.
