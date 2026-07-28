@@ -1,20 +1,288 @@
 name: tests
-on: [push, pull_request]
+
+on: [push, pull_request, workflow_dispatch]
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JOLT_CORE_SHA: 46e1f74fc14f29283586900ef4b98c45375c0500
+
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  posix-runtime:
+    name: Native crypto provider (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86_64
+            runner: ubuntu-24.04
+            expected-os: linux
+            expected-arch: x86-64
+          - name: Linux aarch64
+            runner: ubuntu-24.04-arm
+            expected-os: linux
+            expected-arch: aarch64
+          - name: macOS arm64
+            runner: macos-14
+            expected-os: darwin
+            expected-arch: aarch64
+          - name: macOS x86_64
+            runner: macos-15-intel
+            expected-os: darwin
+            expected-arch: x86-64
+    env:
+      JOLT_AOT_CACHE: "0"
+      JOLT_EXPECT_OS: ${{ matrix.expected-os }}
+      JOLT_EXPECT_ARCH: ${{ matrix.expected-arch }}
     steps:
       - uses: actions/checkout@v4
-      - name: Install joltc
+
+      - name: Install source-build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git liblz4-dev zlib1g-dev \
+            libncurses-dev uuid-dev libssl-dev
+
+      - name: Install source-build dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install lz4 openssl@3
+
+      - name: Restore Chez Scheme (Linux)
+        if: runner.os == 'Linux'
+        id: cache-chez-linux
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/chez
+          key: chez-${{ runner.os }}-${{ runner.arch }}-v10.4.1-x11off-v1
+
+      - name: Build official Chez Scheme v10.4.1 from source (Linux)
+        if: runner.os == 'Linux' && steps.cache-chez-linux.outputs.cache-hit != 'true'
+        shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y liblz4-1 zlib1g libtinfo6 libssl3
-          url=$(curl -fsSL https://api.github.com/repos/jolt-lang/jolt/releases/latest \
-                | jq -r '.assets[] | select(.name | test("x86_64-linux\\.tar\\.gz$")) | .browser_download_url')
-          mkdir -p "$HOME/.jolt"
-          curl -fsSL "$url" | tar xz -C "$HOME/.jolt" --strip-components=1
-          chmod +x "$HOME/.jolt/joltc"
-          echo "$HOME/.jolt" >> "$GITHUB_PATH"
-      - name: Test
-        run: JOLT_PWD="$PWD" joltc -M:test
+          git clone --depth 1 --branch v10.4.1 \
+            https://github.com/cisco/ChezScheme.git "$RUNNER_TEMP/chez-src"
+          cd "$RUNNER_TEMP/chez-src"
+          ./configure --installprefix="$HOME/chez" --threads --disable-x11
+          make -j"$(nproc)"
+          make install
+
+      - name: Restore Chez Scheme (macOS)
+        if: runner.os == 'macOS'
+        id: cache-chez-macos
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/chez
+          key: chez-${{ runner.os }}-${{ runner.arch }}-v10.4.1-x11off-v1
+
+      - name: Build official Chez Scheme v10.4.1 from source (macOS)
+        if: runner.os == 'macOS' && steps.cache-chez-macos.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch v10.4.1 \
+            https://github.com/cisco/ChezScheme.git "$RUNNER_TEMP/chez-src"
+          cd "$RUNNER_TEMP/chez-src"
+          ./configure --installprefix="$HOME/chez" --threads --disable-x11
+          make -j"$(sysctl -n hw.ncpu)"
+          make install
+
+      - name: Provide and assert official Chez v10.4.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          bindir="$HOME/chez/bin"
+          test -x "$bindir/scheme"
+          printf '#!/bin/sh\nexec %s "$@"\n' "$bindir/scheme" > "$bindir/chez"
+          chmod +x "$bindir/chez"
+          echo "$bindir" >> "$GITHUB_PATH"
+          "$bindir/chez" --version | tee "$RUNNER_TEMP/chez-version"
+          grep -Fxq '10.4.1' "$RUNNER_TEMP/chez-version"
+
+      - name: Save Chez Scheme (Linux)
+        if: runner.os == 'Linux' && steps.cache-chez-linux.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/chez
+          key: ${{ steps.cache-chez-linux.outputs.cache-primary-key }}
+
+      - name: Save Chez Scheme (macOS)
+        if: runner.os == 'macOS' && steps.cache-chez-macos.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/chez
+          key: ${{ steps.cache-chez-macos.outputs.cache-primary-key }}
+
+      - name: Checkout pinned Jolt fork
+        uses: actions/checkout@v4
+        with:
+          repository: casselc/jolt
+          ref: ${{ env.JOLT_CORE_SHA }}
+          submodules: recursive
+          path: jolt
+
+      - name: Run native provider and byte-window contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          export JOLT_GITLIBS="$RUNNER_TEMP/jolt-gitlibs"
+          mkdir -p "$JOLT_GITLIBS"
+          JOLT_PWD="$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/jolt/bin/jolt" \
+            -M:test
+
+  windows-x64-runtime:
+    name: Native crypto provider (Windows x86_64)
+    runs-on: windows-2022
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      JOLT_AOT_CACHE: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSYS2 source-build toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          path-type: inherit
+          install: >-
+            git make mingw-w64-x86_64-gcc mingw-w64-x86_64-lz4
+            mingw-w64-x86_64-zlib
+
+      - name: Restore Chez Scheme
+        id: cache-chez-windows
+        uses: actions/cache/restore@v4
+        with:
+          path: chez-install
+          key: chez-${{ runner.os }}-${{ runner.arch }}-v10.4.1-mingw64-v1
+
+      - name: Build official Chez Scheme v10.4.1 from source
+        if: steps.cache-chez-windows.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch v10.4.1 \
+            https://github.com/cisco/ChezScheme.git "$RUNNER_TEMP/chez-src"
+          cd "$RUNNER_TEMP/chez-src"
+          ./configure --threads
+          make -j"$(nproc)"
+          inst="$GITHUB_WORKSPACE/chez-install"
+          mkdir -p "$inst/bin" "$inst/csv"
+          cp ta6nt/bin/ta6nt/*.exe "$inst/bin/"
+          cp ta6nt/bin/ta6nt/*.dll "$inst/bin/" 2>/dev/null || true
+          cp ta6nt/boot/ta6nt/petite.boot ta6nt/boot/ta6nt/scheme.boot "$inst/bin/"
+          cp ta6nt/boot/ta6nt/petite.boot ta6nt/boot/ta6nt/scheme.boot "$inst/csv/"
+          cp ta6nt/boot/ta6nt/scheme.h "$inst/csv/"
+          cp ta6nt/boot/ta6nt/libkernel.a "$inst/csv/"
+
+      - name: Assert official Chez v10.4.1
+        run: |
+          set -euo pipefail
+          "$GITHUB_WORKSPACE/chez-install/bin/scheme.exe" --version |
+            tee "$RUNNER_TEMP/chez-version"
+          grep -Fxq '10.4.1' "$RUNNER_TEMP/chez-version"
+
+      - name: Save Chez Scheme
+        if: steps.cache-chez-windows.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: chez-install
+          key: ${{ steps.cache-chez-windows.outputs.cache-primary-key }}
+
+      - name: Checkout pinned Jolt fork
+        uses: actions/checkout@v4
+        with:
+          repository: casselc/jolt
+          ref: ${{ env.JOLT_CORE_SHA }}
+          submodules: recursive
+          path: jolt
+
+      - name: Run native CNG and byte-window contracts
+        shell: powershell
+        run: |
+          & "$env:GITHUB_WORKSPACE\tools\test-windows-source.ps1" `
+            -ProjectPath "$env:GITHUB_WORKSPACE" `
+            -RuntimePath "$env:GITHUB_WORKSPACE\jolt" `
+            -ChezExe "$env:GITHUB_WORKSPACE\chez-install\bin\scheme.exe" `
+            -ExpectedArch 'x86-64' `
+            -TimeoutSeconds 600
+
+  windows-arm64-runtime:
+    name: Native crypto provider (Windows aarch64)
+    runs-on: windows-11-vs2026-arm
+    timeout-minutes: 40
+    env:
+      JOLT_AOT_CACHE: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore native ARM64 Chez Scheme
+        id: cache-chez-arm64
+        uses: actions/cache/restore@v4
+        with:
+          path: chez-arm64/tarm64nt
+          key: chez-${{ runner.os }}-${{ runner.arch }}-v10.4.1-tarm64nt-v1
+
+      - name: Checkout official Chez Scheme v10.4.1
+        if: steps.cache-chez-arm64.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: cisco/ChezScheme
+          ref: v10.4.1
+          submodules: recursive
+          persist-credentials: false
+          path: chez-arm64
+
+      - name: Build native ARM64 Chez Scheme from source
+        if: steps.cache-chez-arm64.outputs.cache-hit != 'true'
+        shell: cmd
+        run: |
+          cd /d "%GITHUB_WORKSPACE%\chez-arm64"
+          call build.bat tarm64nt /only
+
+      - name: Checkout pinned Jolt fork
+        uses: actions/checkout@v4
+        with:
+          repository: casselc/jolt
+          ref: ${{ env.JOLT_CORE_SHA }}
+          submodules: recursive
+          path: jolt
+
+      - name: Assert native Chez v10.4.1
+        shell: pwsh
+        run: |
+          $scheme = Join-Path $env:GITHUB_WORKSPACE `
+            'chez-arm64\tarm64nt\bin\tarm64nt\scheme.exe'
+          if (-not (Test-Path $scheme)) {
+            throw "native ARM64 Chez executable not found: $scheme"
+          }
+          $version = (& $scheme --version | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host $version
+          if ($version -ne '10.4.1') {
+            throw "expected Chez Scheme 10.4.1, got: $version"
+          }
+
+      - name: Save native ARM64 Chez Scheme
+        if: steps.cache-chez-arm64.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: chez-arm64/tarm64nt
+          key: ${{ steps.cache-chez-arm64.outputs.cache-primary-key }}
+
+      - name: Run native CNG and byte-window contracts
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE\tools\test-windows-source.ps1" `
+            -ProjectPath "$env:GITHUB_WORKSPACE" `
+            -RuntimePath "$env:GITHUB_WORKSPACE\jolt" `
+            -ChezExe "$env:GITHUB_WORKSPACE\chez-arm64\tarm64nt\bin\tarm64nt\scheme.exe" `
+            -ExpectedArch 'aarch64' `
+            -TimeoutSeconds 900
