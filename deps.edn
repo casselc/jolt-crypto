@@ -17,4 +17,4 @@
  :aliases {:test {:extra-paths ["test"]
                   :main-opts ["-m" "jolt.crypto-test"]}}
 
- :tasks {test "joltc -M:test"}}
+ :tasks {test "jolt -M:test"}}
