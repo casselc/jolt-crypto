@@ -4,8 +4,8 @@
   surface that real Clojure libraries touch:
 
     Cipher        AES/CBC/PKCS5Padding (128/192/256, key length picks the variant)
-    Mac           HmacSHA256 / HmacSHA1
-    MessageDigest SHA-256 / SHA-1 / MD5
+    Mac           HmacSHA512 / HmacSHA384 / HmacSHA256 / HmacSHA1
+    MessageDigest SHA-512 / SHA-384 / SHA-256 / SHA-224 / SHA-1 / MD5
     SecureRandom  RAND_bytes
     SecretKeySpec / IvParameterSpec   key + IV holders
 
@@ -27,7 +27,10 @@
 (ffi/defcfn c-aes256   "EVP_aes_256_cbc"     [] :pointer)
 (ffi/defcfn c-md5      "EVP_md5"             [] :pointer)
 (ffi/defcfn c-sha1     "EVP_sha1"            [] :pointer)
+(ffi/defcfn c-sha224   "EVP_sha224"          [] :pointer)
 (ffi/defcfn c-sha256   "EVP_sha256"          [] :pointer)
+(ffi/defcfn c-sha384   "EVP_sha384"          [] :pointer)
+(ffi/defcfn c-sha512   "EVP_sha512"          [] :pointer)
 (ffi/defcfn c-ctx-new  "EVP_CIPHER_CTX_new"  [] :pointer)
 (ffi/defcfn c-ctx-free "EVP_CIPHER_CTX_free" [:pointer] :void)
 (ffi/defcfn c-enc-init "EVP_EncryptInit_ex"  [:pointer :pointer :pointer :pointer :pointer] :int)
@@ -83,12 +86,12 @@
             (finally (c-ctx-free ctx) (ffi/free outp) (ffi/free outlp))))))))
 
 ;; --- HMAC -------------------------------------------------------------------
-(defn hmac [md-fn key data]
+(defn hmac [md-fn outlen key data]
   (let [key (->ba key) data (->ba data) kl (alength key) dl (alength data)]
     (with-ptrs [key data]
       (fn [kp dp]
         (let [mdp (ffi/alloc 64)]
-          (try (c-hmac (md-fn) kp kl dp dl mdp ffi/null) (ffi/read-array mdp 32)
+          (try (c-hmac (md-fn) kp kl dp dl mdp ffi/null) (ffi/read-array mdp outlen)
                (finally (ffi/free mdp))))))))
 
 ;; --- digest -----------------------------------------------------------------
@@ -110,10 +113,12 @@
 
 ;; --- algorithm name -> primitive --------------------------------------------
 (defn- mac-md [algo]
-  (case (str algo) ("HmacSHA256" "HMACSHA256") c-sha256 ("HmacSHA1" "HMACSHA1") c-sha1
+  (case (str algo) ("HmacSHA512" "HMACSHA512") [c-sha512 64] ("HmacSHA384" "HMACSHA384") [c-sha384 48]
+    ("HmacSHA256" "HMACSHA256") [c-sha256 32] ("HmacSHA1" "HMACSHA1") [c-sha1 20]
     (throw (ex-info (str "unsupported Mac algorithm: " algo) {:algo algo}))))
 (defn- digest-spec [algo]
-  (case (str algo) ("SHA-256" "SHA256") [c-sha256 32] ("SHA-1" "SHA1") [c-sha1 20]
+  (case (str algo) ("SHA-512" "SHA512") [c-sha512 64] ("SHA-384" "SHA384") [c-sha384 48]
+    ("SHA-256" "SHA256") [c-sha256 32] ("SHA-224" "SHA224") [c-sha224 28] ("SHA-1" "SHA1") [c-sha1 20]
     ("MD5") [c-md5 16]
     (throw (ex-info (str "unsupported MessageDigest algorithm: " algo) {:algo algo}))))
 
@@ -152,8 +157,8 @@
     (__register-class-statics! nm {"getInstance" (fn [algo & _] (doto (tt :jolt.crypto/mac) (tput! :md (mac-md algo))))}))
   (__register-class-methods! :jolt.crypto/mac
     {"init" (fn [self key & _] (tput! self :key (->ba key)) nil)
-     "doFinal" (fn [self data & _] (hmac (tget self :md) (tget self :key) data))
-     "getMacLength" (fn [self] 32)})
+     "doFinal" (fn [self data & _] (let [[mdf len] (tget self :md)] (hmac mdf len (tget self :key) data)))
+     "getMacLength" (fn [self] (let [[_ len] (tget self :md)] len))})
 
   ;; java.security.MessageDigest
   (doseq [nm ["MessageDigest" "java.security.MessageDigest"]]
