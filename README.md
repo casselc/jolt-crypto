@@ -7,8 +7,8 @@ system OpenSSL (`libcrypto`) through `jolt.ffi`, and exposed as the slice of the
 | Class | What you get |
 |-------|--------------|
 | `javax.crypto.Cipher` | `AES/CBC/PKCS5Padding` (128/192/256 — key length picks the variant) |
-| `javax.crypto.Mac` | `HmacSHA256`, `HmacSHA1` |
-| `java.security.MessageDigest` | `SHA-256`, `SHA-1`, `MD5` |
+| `javax.crypto.Mac` | `HmacSHA512`, `HmacSHA384`, `HmacSHA256`, `HmacSHA1` |
+| `java.security.MessageDigest` | `SHA-512`, `SHA-384`, `SHA-256`, `SHA-224`, `SHA-1`, `MD5` |
 | `java.security.SecureRandom` | `RAND_bytes`-backed `nextBytes` / `generateSeed` |
 | `javax.crypto.spec.SecretKeySpec` / `IvParameterSpec` | key + IV holders |
 

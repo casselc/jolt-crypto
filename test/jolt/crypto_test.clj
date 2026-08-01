@@ -12,6 +12,11 @@
 
 (defn- ba= [a b] (= (seq a) (seq b)))
 
+(defn- hex [d] (apply str (map #(format "%02x" (bit-and % 0xff)) (seq d))))
+
+(def ^:private foo (byte-array (map int "foo")))
+(def ^:private k (byte-array (map int "k")))
+
 (defn- encrypt [key data]
   (let [iv (byte-array (repeatedly 16 #(rand-int 256)))
         cipher (Cipher/getInstance "AES/CBC/PKCS5Padding")]
@@ -65,6 +70,48 @@
         hex (apply str (map #(format "%02x" (bit-and % 0xff)) (seq d)))]
     (check "MD5(abc) matches known vector"
            (= hex "900150983cd24fb0d6963f7d28e17f72")))
+
+  ;; SHA-2 family over "foo" — hex vectors measured on the reference JVM
+  (doseq [[algo len expected]
+          [["MD5"     16 "acbd18db4cc2f85cedef654fccc4a4d8"]
+           ["SHA-1"   20 "0beec7b5ea3f0fdbc95d0dd47f3c5bc275da8a33"]
+           ["SHA-224" 28 "0808f64e60d58979fcb676c96ec938270dea42445aeefcd3a4e6f8db"]
+           ["SHA-256" 32 "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"]
+           ["SHA-384" 48 "98c11ffdfdd540676b1a137cb1a22b2a70350c9a44171d6b1180c6be5cbb2ee3f79d532c8a1dd9ef2e8e08e752a3babb"]
+           ["SHA-512" 64 "f7fbba6e0636f890e56fbbf3283e524c6fa3204ae298382d624741d0dc6638326e282c41be5e4254d8820772c5518a2c5a8c0c7f7eda19594a7eb539453e1ed7"]]]
+    (let [d (.digest (MessageDigest/getInstance algo) foo)]
+      (check (str algo "(foo) is " len " bytes") (= len (alength d)))
+      (check (str algo "(foo) matches JVM vector") (= expected (hex d)))))
+
+  ;; the dashless spelling resolves to the same digest
+  (check "SHA512 alias matches SHA-512"
+         (= (hex (.digest (MessageDigest/getInstance "SHA-512") foo))
+            (hex (.digest (MessageDigest/getInstance "SHA512") foo))))
+
+  ;; HMAC over "foo" with key "k" — hex vectors measured on the reference JVM
+  ;; (HmacSHA384 measured via OpenSSL; its SHA-256/512 outputs match the JVM
+  ;; vectors byte-for-byte, so the measurement is authoritative)
+  (doseq [[algo len expected]
+          [["HmacSHA1"   20 "7a19f035e2380ef9611f621a635ee1062418880a"]
+           ["HmacSHA256" 32 "dc9652dbf73f8c8e4f8d522960bd624b011981816111ce435979a911e929aba5"]
+           ["HmacSHA384" 48 "fbd8da1a4a002a279c5bfe96950f7c4b893467b63accb010bde2ec380169101a81f541e968e8ac71391fd4d2740e45c4"]
+           ["HmacSHA512" 64 "5df9826d89479edcc2aa25c2336798fca37f760ddc249adc96843692bea2c71610d4e14ba2580181bd86ac6f0f71bf4b1e2bc1c15fe28a1c97a5bebd0b355166"]]]
+    (let [m (Mac/getInstance algo)]
+      (.init m (SecretKeySpec. k algo))
+      (let [d (.doFinal m foo)]
+        (check (str algo "(k, foo) is " len " bytes") (= len (alength d)))
+        (check (str algo "(k, foo) matches JVM vector") (= expected (hex d)))
+        (check (str algo " getMacLength") (= len (.getMacLength m))))))
+
+  ;; unknown algorithms throw, naming the algorithm
+  (let [msg (try (MessageDigest/getInstance "WHIRLPOOL") nil
+                 (catch Exception e (.getMessage e)))]
+    (check "unknown MessageDigest algorithm throws naming it"
+           (= msg "unsupported MessageDigest algorithm: WHIRLPOOL")))
+  (let [msg (try (Mac/getInstance "HmacWHIRLPOOL") nil
+                 (catch Exception e (.getMessage e)))]
+    (check "unknown Mac algorithm throws naming it"
+           (= msg "unsupported Mac algorithm: HmacWHIRLPOOL")))
 
   (if (zero? @failures)
     (println "\nALL CRYPTO TESTS PASSED")
