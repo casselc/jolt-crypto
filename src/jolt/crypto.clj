@@ -274,6 +274,30 @@
 (def ENCRYPT-MODE 1)
 (def DECRYPT-MODE 2)
 
+(defn- sr-uint
+  "An unsigned integer from `n` CSPRNG bytes, big-endian."
+  [n]
+  (let [b (random-bytes n)]
+    (loop [i 0 acc 0]
+      (if (= i n) acc (recur (inc i) (+ (* acc 256) (bit-and (aget b i) 255)))))))
+
+(defn- sr-signed
+  "The same, reinterpreted as a signed n-byte two's-complement integer."
+  [n]
+  (let [u (sr-uint n) half (bit-shift-left 1 (dec (* 8 n)))]
+    (if (>= u half) (- u (* 2 half)) u)))
+
+(defn- sr-next-int-bound
+  "Uniform in [0, bound). Rejection sampling rather than a bare modulo: over a
+  range that is not a multiple of bound, mod makes the low residues more likely,
+  which is a real bias in something used to pick tokens and salts."
+  [bound]
+  (when-not (pos? bound)
+    (throw (ex-info "bound must be positive" {:bound bound})))
+  (loop []
+    (let [u (bit-and (sr-uint 4) 0x7fffffff) r (mod u bound)]
+      (if (<= (- u r) (- 2147483648 bound)) r (recur)))))
+
 (defn install! []
   ;; javax.crypto.spec.SecretKeySpec / IvParameterSpec — key + IV holders.
   (doseq [nm ["SecretKeySpec" "javax.crypto.spec.SecretKeySpec"]]
@@ -323,14 +347,34 @@
 
   ;; java.security.SecureRandom — real RAND_bytes (http-client's stub only made
   ;; a table; this fills the buffer for genuine randomness).
+  ;;
+  ;; Recent jolt implements this class natively over the OS CSPRNG, and this
+  ;; registration overrides it whenever this namespace loads. So the surface here
+  ;; has to be the WHOLE surface: when it was just nextBytes/generateSeed, merely
+  ;; requiring jolt.crypto for a Cipher took nextInt and nextLong away from a
+  ;; program that had them. Keeping it complete also keeps this library working
+  ;; on a jolt that has no native SecureRandom.
   (doseq [nm ["SecureRandom" "java.security.SecureRandom"]]
-    (__register-class-ctor! nm (fn [& _] (tt :jolt.crypto/secure-random))))
+    (__register-class-ctor! nm (fn [& _] (tt :jolt.crypto/secure-random)))
+    (__register-class-statics! nm {"getInstance" (fn [& _] (tt :jolt.crypto/secure-random))
+                                   "getInstanceStrong" (fn [& _] (tt :jolt.crypto/secure-random))}))
   (__register-class-methods! :jolt.crypto/secure-random
     {"nextBytes" (fn [self buf & _]
                    (let [n (alength buf) r (random-bytes n)]
                      (dotimes [i n] (aset buf i (aget r i)))
                      nil))
-     "generateSeed" (fn [self n] (random-bytes n))})
+     "generateSeed" (fn [self n] (random-bytes n))
+     "nextInt" (fn [self & args]
+                 (if (seq args)
+                   (sr-next-int-bound (first args))
+                   (sr-signed 4)))
+     "nextLong" (fn [self] (sr-signed 8))
+     "nextDouble" (fn [self] (* (bit-and (sr-uint 7) 9007199254740991) (/ 1.0 9007199254740992)))
+     "nextFloat" (fn [self] (/ (bit-and (sr-uint 3) 16777215) 16777216.0))
+     "nextBoolean" (fn [self] (= 1 (bit-and (sr-uint 1) 1)))
+     ;; setSeed supplements entropy on the JVM and never replaces it; with
+     ;; RAND_bytes there is nothing to supplement, so it is a no-op.
+     "setSeed" (fn [self & _] nil)})
 
   ;; --- EC keys and ECDSA ----------------------------------------------------
   ;; java.security.spec: the three holders that carry a curve name or DER bytes.
