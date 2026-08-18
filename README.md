@@ -1,7 +1,7 @@
 # jolt-crypto
 
-Symmetric crypto for [Jolt](https://github.com/jolt-lang/jolt), bound to the
-system OpenSSL (`libcrypto`) through `jolt.ffi`, and exposed as the slice of the
+Crypto for [Jolt](https://github.com/jolt-lang/jolt), bound to the system
+OpenSSL (`libcrypto`) through `jolt.ffi`, and exposed as the slice of the
 `javax.crypto` / `java.security` surface real Clojure libraries touch:
 
 | Class | What you get |
@@ -11,9 +11,24 @@ system OpenSSL (`libcrypto`) through `jolt.ffi`, and exposed as the slice of the
 | `java.security.MessageDigest` | `SHA-512`, `SHA-384`, `SHA-256`, `SHA-224`, `SHA-1`, `MD5` |
 | `java.security.SecureRandom` | `RAND_bytes`-backed `nextBytes` / `generateSeed` |
 | `javax.crypto.spec.SecretKeySpec` / `IvParameterSpec` | key + IV holders |
+| `java.security.KeyPairGenerator` | EC keygen over P-256 / P-384 / P-521 / secp256k1 |
+| `java.security.Signature` | `SHA1`/`SHA224`/`SHA256`/`SHA384`/`SHA512withECDSA` |
+| `java.security.KeyFactory` | EC keys from encoded DER |
+| `java.security.spec.ECGenParameterSpec` / `X509EncodedKeySpec` / `PKCS8EncodedKeySpec` | curve name + DER key holders |
 
 This is enough for `ring-core`'s encrypted session-cookie store and the CSRF
 token machinery, so **ring-defaults** loads and runs on Jolt.
+
+The EC keys and signatures are wire-compatible with the JVM in both directions.
+`getEncoded` gives the same X.509 SubjectPublicKeyInfo and PKCS#8 PrivateKeyInfo
+DER the JDK does, and `Signature` produces the DER-encoded `SEQUENCE` of *r* and
+*s* that `SHA256withECDSA` produces there, so keys and signatures cross between a
+JVM and a Jolt process unchanged. Two small supersets: the curve aliases
+`prime256v1` and `P-256` are accepted alongside the JDK's `secp256r1` and
+`NIST P-256`, and `secp256k1` is available where the default JDK provider has no
+such curve. OpenSSL's PKCS#8 embeds the optional public key where the JDK's does
+not, so a private key encodes to 138 bytes rather than the JDK's 67; both forms
+parse on either side.
 
 ## Use
 

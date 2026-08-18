@@ -5,7 +5,8 @@
 
 (import '[javax.crypto Cipher Mac])
 (import '[javax.crypto.spec SecretKeySpec IvParameterSpec])
-(import '[java.security SecureRandom MessageDigest])
+(import '[java.security SecureRandom MessageDigest KeyPairGenerator Signature KeyFactory])
+(import '[java.security.spec ECGenParameterSpec X509EncodedKeySpec PKCS8EncodedKeySpec])
 
 (def ^:private failures (atom 0))
 (defn- check [label ok?] (println (if ok? "ok  " "FAIL") label) (when-not ok? (swap! failures inc)))
@@ -13,6 +14,10 @@
 (defn- ba= [a b] (= (seq a) (seq b)))
 
 (defn- hex [d] (apply str (map #(format "%02x" (bit-and % 0xff)) (seq d))))
+
+(defn- unhex [s]
+  (byte-array (map (fn [[a b]] (unchecked-byte (Integer/parseInt (str a b) 16)))
+                   (partition 2 s))))
 
 (def ^:private foo (byte-array (map int "foo")))
 (def ^:private k (byte-array (map int "k")))
@@ -112,6 +117,109 @@
                  (catch Exception e (.getMessage e)))]
     (check "unknown Mac algorithm throws naming it"
            (= msg "unsupported Mac algorithm: HmacWHIRLPOOL")))
+
+  ;; --- EC keys and ECDSA ----------------------------------------------------
+  ;; A P-256 keypair encodes to the same lengths the JVM produces: 91 bytes of
+  ;; X.509 SubjectPublicKeyInfo, and a PKCS#8 PrivateKeyInfo. OpenSSL's PKCS#8
+  ;; carries the optional public key where the JDK's does not, so the private
+  ;; length legitimately differs from the JDK's 67; both parse on either side.
+  (let [kpg (doto (KeyPairGenerator/getInstance "EC") (.initialize (ECGenParameterSpec. "secp256r1")))
+        kp  (.genKeyPair kpg)
+        pub (.getEncoded (.getPublic kp))
+        priv (.getEncoded (.getPrivate kp))
+        data (byte-array (map int "sign me"))]
+    (check "P-256 public key is a 91-byte X.509 SPKI" (= 91 (alength pub)))
+    (check "P-256 public key DER starts with SEQUENCE" (= 0x30 (bit-and (aget pub 0) 0xff)))
+    (check "public key reports EC / X.509" (and (= "EC" (.getAlgorithm (.getPublic kp)))
+                                                (= "X.509" (.getFormat (.getPublic kp)))))
+    (check "private key reports EC / PKCS#8" (and (= "EC" (.getAlgorithm (.getPrivate kp)))
+                                                  (= "PKCS#8" (.getFormat (.getPrivate kp)))))
+    (check "two keypairs differ" (not (ba= pub (.getEncoded (.getPublic (.genKeyPair kpg))))))
+
+    ;; sign / verify round-trip through KeyFactory, the way a caller who has
+    ;; only the encoded bytes has to do it
+    (let [kf (KeyFactory/getInstance "EC")
+          sk (.generatePrivate kf (PKCS8EncodedKeySpec. priv))
+          pk (.generatePublic kf (X509EncodedKeySpec. pub))
+          sig (doto (Signature/getInstance "SHA256withECDSA") (.initSign sk) (.update data))
+          s (.sign sig)]
+      (check "ECDSA signature is a DER SEQUENCE" (= 0x30 (bit-and (aget s 0) 0xff)))
+      (check "signature verifies"
+             (-> (doto (Signature/getInstance "SHA256withECDSA") (.initVerify pk) (.update data))
+                 (.verify s)))
+      (check "tampered data fails"
+             (not (-> (doto (Signature/getInstance "SHA256withECDSA") (.initVerify pk)
+                        (.update (byte-array (map int "sign ME"))))
+                      (.verify s))))
+      (check "a malformed signature is false, not a throw"
+             (false? (-> (doto (Signature/getInstance "SHA256withECDSA") (.initVerify pk) (.update data))
+                         (.verify (byte-array 8)))))
+      (check "another key's signature fails"
+             (let [other (.getPublic (.genKeyPair kpg))]
+               (not (-> (doto (Signature/getInstance "SHA256withECDSA") (.initVerify other) (.update data))
+                        (.verify s)))))
+      ;; update accumulates, so a split feed signs the same bytes as one call
+      (check "split update matches a single update"
+             (-> (doto (Signature/getInstance "SHA256withECDSA") (.initVerify pk)
+                   (.update (byte-array (map int "sign")))
+                   (.update (byte-array (map int " me"))))
+                 (.verify s)))))
+
+  ;; Known-answer vector: key and signature generated on the reference JVM
+  ;; (Clojure 1.12.3 / SHA256withECDSA). Verifying it here proves the shims
+  ;; interoperate with real JVM output rather than only with themselves.
+  (let [pub  (unhex "3059301306072a8648ce3d020106082a8648ce3d03010703420004188cdf274dba76ea09c9bcf7c4f8bb4dc821a3cb3ec469db466feebc99b4a720f6fb0950fc87b12ed9f1954a28a4af697f4233a053f8567a6ae889875c286e0f")
+        priv (unhex "3041020100301306072a8648ce3d020106082a8648ce3d0301070427302502010104208ba51c78232e7814c60584a588cd117946b2bb6ae0cb375b5e9b78eec6f6ff0f")
+        sig  (unhex "304402202938601226d18b8468496a204ee30cfa17a53b96fc0dd6db73612f6cf328c8770220703004f1f2be8836a7c208d8195158eca27d1334a42750d7fe47d798251147b0")
+        data (byte-array (map int "jolt-crypto ECDSA known-answer vector"))
+        kf   (KeyFactory/getInstance "EC")
+        pk   (.generatePublic kf (X509EncodedKeySpec. pub))]
+    (check "verifies a signature produced by the JVM"
+           (-> (doto (Signature/getInstance "SHA256withECDSA") (.initVerify pk) (.update data))
+               (.verify sig)))
+    ;; the JDK's shorter PKCS#8 (no embedded public key) parses too, and a
+    ;; signature made from it verifies against the JVM-generated public key
+    (check "signs with the JDK's 67-byte PKCS#8"
+           (let [sk (.generatePrivate kf (PKCS8EncodedKeySpec. priv))
+                 s  (-> (doto (Signature/getInstance "SHA256withECDSA") (.initSign sk) (.update data))
+                        .sign)]
+             (-> (doto (Signature/getInstance "SHA256withECDSA") (.initVerify pk) (.update data))
+                 (.verify s)))))
+
+  ;; the other digests and curves resolve, and .initialize takes a key size
+  (doseq [algo ["SHA1withECDSA" "SHA384withECDSA" "SHA512withECDSA"]]
+    (let [kp (.genKeyPair (KeyPairGenerator/getInstance "EC"))
+          data (byte-array (map int "multi-digest"))
+          s (-> (doto (Signature/getInstance algo) (.initSign (.getPrivate kp)) (.update data)) .sign)]
+      (check (str algo " round-trips")
+             (-> (doto (Signature/getInstance algo) (.initVerify (.getPublic kp)) (.update data))
+                 (.verify s)))))
+  ;; Lengths measured on the reference JVM. prime256v1 and P-256 are aliases the
+  ;; JDK's provider does not take; accepting them is a superset, not a divergence.
+  (doseq [[curve len] [["secp256r1" 91] ["NIST P-256" 91] ["prime256v1" 91] ["P-256" 91]
+                       ["secp384r1" 120] ["secp521r1" 158]]]
+    (let [kpg (doto (KeyPairGenerator/getInstance "EC") (.initialize (ECGenParameterSpec. curve)))]
+      (check (str curve " public key is " len " bytes")
+             (= len (alength (.getEncoded (.getPublic (.genKeyPair kpg))))))))
+  (let [kpg (doto (KeyPairGenerator/getInstance "EC") (.initialize 384))]
+    (check "initialize(int) selects the P-curve of that size"
+           (= 120 (alength (.getEncoded (.getPublic (.genKeyPair kpg)))))))
+
+  ;; unknown algorithms and curves throw, naming what was asked for
+  (check "unknown Signature algorithm throws naming it"
+         (= "unsupported Signature algorithm: SHA256withRSA"
+            (try (Signature/getInstance "SHA256withRSA") nil (catch Exception e (.getMessage e)))))
+  (check "unknown curve throws naming it"
+         (= "unsupported EC curve: brainpoolP256r1"
+            (try (.initialize (KeyPairGenerator/getInstance "EC") (ECGenParameterSpec. "brainpoolP256r1"))
+                 nil (catch Exception e (.getMessage e)))))
+  (check "a non-EC KeyPairGenerator throws naming it"
+         (= "unsupported KeyPairGenerator algorithm: RSA"
+            (try (KeyPairGenerator/getInstance "RSA") nil (catch Exception e (.getMessage e)))))
+  (check "garbage key bytes are rejected at generatePublic"
+         (= "not a valid DER-encoded EC key"
+            (try (.generatePublic (KeyFactory/getInstance "EC") (X509EncodedKeySpec. (byte-array 10)))
+                 nil (catch Exception e (.getMessage e)))))
 
   (if (zero? @failures)
     (println "\nALL CRYPTO TESTS PASSED")
