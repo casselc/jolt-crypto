@@ -221,6 +221,30 @@
             (try (.generatePublic (KeyFactory/getInstance "EC") (X509EncodedKeySpec. (byte-array 10)))
                  nil (catch Exception e (.getMessage e)))))
 
+  ;; java.security.SecureRandom — the whole surface, because this registration
+  ;; overrides jolt's native class whenever this namespace loads. A narrower shim
+  ;; here silently removed nextInt/nextLong from any program that required
+  ;; jolt.crypto for something unrelated.
+  (let [r (java.security.SecureRandom.)]
+    (check "nextBytes fills the buffer"
+           (let [b (byte-array 32)] (.nextBytes r b) (> (count (distinct (seq b))) 8)))
+    (check "generateSeed returns the requested length" (= 32 (alength (.generateSeed r 32))))
+    (check "nextInt bound stays in range"
+           (every? #(and (>= % 0) (< % 10)) (repeatedly 500 #(.nextInt r 10))))
+    (check "nextInt bound covers the range" (= 10 (count (distinct (repeatedly 500 #(.nextInt r 10))))))
+    (check "nextInt is not a constant" (> (count (distinct (repeatedly 200 #(.nextInt r)))) 190))
+    (check "nextLong is not a constant" (> (count (distinct (repeatedly 200 #(.nextLong r)))) 190))
+    (check "nextDouble is in [0,1)" (every? #(and (>= % 0.0) (< % 1.0)) (repeatedly 200 #(.nextDouble r))))
+    (check "nextFloat is in [0,1)" (every? #(and (>= % 0.0) (< % 1.0)) (repeatedly 200 #(.nextFloat r))))
+    (check "nextBoolean yields both" (= #{true false} (set (repeatedly 200 #(.nextBoolean r)))))
+    (check "setSeed does not break the generator" (do (.setSeed r 42) (int? (.nextInt r 100))))
+    (check "a non-positive bound throws"
+           (= :threw (try (.nextInt r 0) :no-throw (catch Exception e :threw))))
+    (check "getInstance returns a working generator"
+           (int? (.nextInt (java.security.SecureRandom/getInstance "SHA1PRNG") 100)))
+    (check "getInstanceStrong returns a working generator"
+           (int? (.nextInt (java.security.SecureRandom/getInstanceStrong) 100))))
+
   (if (zero? @failures)
     (println "\nALL CRYPTO TESTS PASSED")
     (do (println "\n" @failures "FAILURES") (System/exit 1))))
