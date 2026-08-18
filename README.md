@@ -9,7 +9,7 @@ OpenSSL (`libcrypto`) through `jolt.ffi`, and exposed as the slice of the
 | `javax.crypto.Cipher` | `AES/CBC/PKCS5Padding` (128/192/256 — key length picks the variant) |
 | `javax.crypto.Mac` | `HmacSHA512`, `HmacSHA384`, `HmacSHA256`, `HmacSHA1` |
 | `java.security.MessageDigest` | `SHA-512`, `SHA-384`, `SHA-256`, `SHA-224`, `SHA-1`, `MD5` |
-| `java.security.SecureRandom` | `RAND_bytes`-backed `nextBytes` / `generateSeed` |
+| `java.security.SecureRandom` | `RAND_bytes`-backed `nextBytes` / `generateSeed` / `nextInt` / `nextLong` / `nextDouble` / `nextFloat` / `nextBoolean` |
 | `javax.crypto.spec.SecretKeySpec` / `IvParameterSpec` | key + IV holders |
 | `java.security.KeyPairGenerator` | EC keygen over P-256 / P-384 / P-521 / secp256k1 |
 | `java.security.Signature` | `SHA1`/`SHA224`/`SHA256`/`SHA384`/`SHA512withECDSA` |
