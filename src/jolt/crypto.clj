@@ -168,7 +168,15 @@
   (__register-class-methods! :jolt.crypto/md
     {"update" (fn [self data & _] (tput! self :acc (into (tget self :acc) (seq (->ba data)))) nil)
      "digest" (fn [self & args]
-                (let [body (if (seq args) (->ba (first args)) (byte-array (tget self :acc)))]
+                ;; digest(bytes) is update(bytes)-then-digest on the JVM: the
+                ;; accumulated update bytes come FIRST, not instead. Dropping
+                ;; them made clj-uuid's namespaced v3/v5 uuids — digest-bytes
+                ;; updates with the namespace, digests with the name — hash the
+                ;; name alone.
+                (let [acc (tget self :acc)
+                      body (byte-array (if (seq args)
+                                         (into acc (seq (->ba (first args))))
+                                         acc))]
                   (tput! self :acc [])
                   (digest (tget self :md) (tget self :len) body)))
      "reset" (fn [self] (tput! self :acc []) nil)})

@@ -64,6 +64,20 @@
     (check "SHA-256(abc) matches NIST vector"
            (= hex "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")))
 
+  ;; update-then-digest accumulates: digest(bytes) appends to the updated
+  ;; state (the JVM contract clj-uuid's digest-bytes relies on), so the split
+  ;; feed equals the one-shot digest of the concatenation.
+  (let [one (.digest (MessageDigest/getInstance "SHA-256") (byte-array (map int "abc")))
+        two (let [md (MessageDigest/getInstance "SHA-256")]
+              (.update md (byte-array (map int "ab")))
+              (.digest md (byte-array (map int "c"))))
+        three (let [md (MessageDigest/getInstance "SHA-256")]
+                (.update md (byte-array (map int "a")))
+                (.update md (byte-array (map int "b")))
+                (.digest md (byte-array (map int "c"))))]
+    (check "update then digest equals one-shot" (ba= one two))
+    (check "updates accumulate across calls" (ba= one three)))
+
   ;; MD5 of "abc" — known vector 900150983cd24fb0d6963f7d28e17f72
   (let [md (MessageDigest/getInstance "MD5")
         d  (.digest md (byte-array (map int "abc")))
