@@ -19,10 +19,13 @@ jobs:
         include:
           - name: Linux x86_64
             runner: ubuntu-24.04
+            install: script
           - name: macOS arm64
             runner: macos-15
+            install: script
           - name: macOS x86_64
             runner: macos-15-intel
+            install: asset
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -39,12 +42,32 @@ jobs:
         run: brew install openssl@3
 
       - name: Install jolt
+        if: matrix.install == 'script'
         run: |
           set -euo pipefail
           # Install through jolt's own install script rather than resolving the
           # release asset here: it owns archive naming and checksum validation.
           curl -fsSL "https://raw.githubusercontent.com/jolt-lang/jolt/v${JOLT_VERSION}/install" \
             | bash -s -- --dir "$HOME/.jolt" --version "$JOLT_VERSION"
+          echo "$HOME/.jolt" >> "$GITHUB_PATH"
+
+      # v0.7.27 publishes this archive and checksum, but that release's install
+      # script still rejects Intel macOS. Exercise the official artifact until
+      # the installer and its published target list agree.
+      - name: Install jolt from the Intel macOS release asset
+        if: matrix.install == 'asset'
+        run: |
+          set -euo pipefail
+          tag="v${JOLT_VERSION}"
+          archive="jolt-${tag}-x86_64-macos.tar.gz"
+          base="https://github.com/jolt-lang/jolt/releases/download/${tag}"
+          curl -fsSLO "${base}/${archive}"
+          curl -fsSLO "${base}/${archive}.sha256"
+          shasum -a 256 -c "${archive}.sha256"
+          tar -zxf "$archive"
+          mkdir -p "$HOME/.jolt"
+          install -m 755 "jolt-${tag}-x86_64-macos/jolt" "$HOME/.jolt/jolt"
+          "$HOME/.jolt/jolt" --version
           echo "$HOME/.jolt" >> "$GITHUB_PATH"
 
       - name: Test
