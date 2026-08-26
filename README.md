@@ -49,8 +49,11 @@ The shims register through Jolt's host-shim hooks (`__register-class-ctor!` /
 and loaded before the namespace; an app that also pulls http-client shares the
 one loaded copy (jolt.deps reconciles natives).
 
+Jolt 0.7.27 or newer is required. On macOS, install OpenSSL 3 with Homebrew;
+both Apple Silicon and Intel Homebrew prefixes are supported.
+
 ## Test
 
 ```
-joltc -M:test
+jolt -M:test
 ```
