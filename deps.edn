@@ -7,10 +7,12 @@
  ;; this and http-client loads each library once — jolt.deps reconciles natives.
  :jolt/native [{:name "crypto"
                 :darwin ["/opt/homebrew/opt/openssl@3/lib/libcrypto.dylib"
+                         "/usr/local/opt/openssl@3/lib/libcrypto.dylib"
                          "/usr/lib/libcrypto.dylib" "libcrypto.dylib"]
                 :linux  ["libcrypto.so.3" "libcrypto.so.1.1" "libcrypto.so"]}
                {:name "ssl"
                 :darwin ["/opt/homebrew/opt/openssl@3/lib/libssl.dylib"
+                         "/usr/local/opt/openssl@3/lib/libssl.dylib"
                          "/usr/lib/libssl.dylib" "libssl.dylib"]
                 :linux  ["libssl.so.3" "libssl.so.1.1" "libssl.so"]}]
 
