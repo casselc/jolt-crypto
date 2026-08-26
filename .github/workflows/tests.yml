@@ -10,7 +10,7 @@ env:
 
 jobs:
   test:
-    name: Jolt ${{ env.JOLT_VERSION }} (${{ matrix.name }})
+    name: Jolt 0.7.27 (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     strategy:
