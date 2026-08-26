@@ -1,22 +1,51 @@
 name: tests
-on: [push, pull_request]
+
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+
+env:
+  JOLT_VERSION: '0.7.27'
+
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: Jolt ${{ env.JOLT_VERSION }} (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86_64
+            runner: ubuntu-24.04
+          - name: macOS arm64
+            runner: macos-15
+          - name: macOS x86_64
+            runner: macos-15-intel
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install runtime dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y liblz4-1 libtinfo6 libssl3
+
+      - name: Install runtime dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install openssl@3
+
       - name: Install jolt
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y liblz4-1 zlib1g libtinfo6 libssl3
           # Install through jolt's own install script rather than resolving the
-          # release asset here: it owns the archive and binary naming (which
-          # changed in v0.5.0, when the CLI was renamed from joltc to jolt) and
-          # verifies the checksum. Resolving the asset by hand left this workflow
-          # chmod'ing a $HOME/.jolt/joltc that no release ships any more.
-          curl -fsSL https://raw.githubusercontent.com/jolt-lang/jolt/main/install \
-            | bash -s -- --dir "$HOME/.jolt"
+          # release asset here: it owns archive naming and checksum validation.
+          curl -fsSL "https://raw.githubusercontent.com/jolt-lang/jolt/v${JOLT_VERSION}/install" \
+            | bash -s -- --dir "$HOME/.jolt" --version "$JOLT_VERSION"
           echo "$HOME/.jolt" >> "$GITHUB_PATH"
+
       - name: Test
         run: JOLT_PWD="$PWD" jolt -M:test
