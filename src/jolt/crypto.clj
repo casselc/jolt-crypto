@@ -169,7 +169,7 @@
     (when (<= len 0) (throw (ex-info "DER encode failed" {:len len})))
     (let [buf (ffi/alloc len) holder (ffi/alloc ptr-size)]
       (try
-        (ffi/write holder :pointer 0 buf)
+        (ffi/write holder :pointer buf 0)
         (let [n (i2d-fn obj holder)]
           (when (<= n 0) (throw (ex-info "DER encode failed" {:len n})))
           (ffi/read-array buf n))
@@ -183,7 +183,7 @@
         buf (ffi/alloc (max 1 n)) holder (ffi/alloc ptr-size)]
     (try
       (ffi/write-array buf der)
-      (ffi/write holder :pointer 0 buf)
+      (ffi/write holder :pointer buf 0)
       (let [pkey (d2i-fn ffi/null holder n)]
         (when (ffi/null? pkey) (throw (ex-info "not a valid DER-encoded EC key" {})))
         (try (f pkey) (finally (c-pkey-free pkey))))
