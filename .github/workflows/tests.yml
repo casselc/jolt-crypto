@@ -3,6 +3,8 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      JOLT_VERSION: '0.8.0'
     steps:
       - uses: actions/checkout@v4
       - name: Install jolt
@@ -10,13 +12,12 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y liblz4-1 zlib1g libtinfo6 libssl3
-          # Install through jolt's own install script rather than resolving the
-          # release asset here: it owns the archive and binary naming (which
-          # changed in v0.5.0, when the CLI was renamed from joltc to jolt) and
-          # verifies the checksum. Resolving the asset by hand left this workflow
-          # chmod'ing a $HOME/.jolt/joltc that no release ships any more.
-          curl -fsSL https://raw.githubusercontent.com/jolt-lang/jolt/main/install \
-            | bash -s -- --dir "$HOME/.jolt"
+          # Use the tagged installer so this 0.8-only FFI surface cannot silently
+          # be tested against the older release currently selected by main.
+          curl -fsSL "https://raw.githubusercontent.com/jolt-lang/jolt/v${JOLT_VERSION}/install" \
+            | bash -s -- --dir "$HOME/.jolt" --version "$JOLT_VERSION"
           echo "$HOME/.jolt" >> "$GITHUB_PATH"
+      - name: Verify Jolt version
+        run: test "$(jolt --version)" = "jolt v${JOLT_VERSION}"
       - name: Test
         run: JOLT_PWD="$PWD" jolt -M:test

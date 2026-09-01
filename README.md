@@ -32,6 +32,8 @@ parse on either side.
 
 ## Use
 
+jolt-crypto requires Jolt v0.8.0 or newer.
+
 ```clojure
 ;; deps.edn
 jolt-lang/jolt-crypto {:git/url "https://github.com/jolt-lang/jolt-crypto"
@@ -52,5 +54,5 @@ one loaded copy (jolt.deps reconciles natives).
 ## Test
 
 ```
-joltc -M:test
+jolt -M:test
 ```
