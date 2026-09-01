@@ -169,7 +169,7 @@
     (when (<= len 0) (throw (ex-info "DER encode failed" {:len len})))
     (let [buf (ffi/alloc len) holder (ffi/alloc ptr-size)]
       (try
-        (ffi/write holder :pointer 0 buf)
+        (ffi/write holder :pointer buf)
         (let [n (i2d-fn obj holder)]
           (when (<= n 0) (throw (ex-info "DER encode failed" {:len n})))
           (ffi/read-array buf n))
@@ -183,7 +183,7 @@
         buf (ffi/alloc (max 1 n)) holder (ffi/alloc ptr-size)]
     (try
       (ffi/write-array buf der)
-      (ffi/write holder :pointer 0 buf)
+      (ffi/write holder :pointer buf)
       (let [pkey (d2i-fn ffi/null holder n)]
         (when (ffi/null? pkey) (throw (ex-info "not a valid DER-encoded EC key" {})))
         (try (f pkey) (finally (c-pkey-free pkey))))
@@ -221,7 +221,7 @@
           (when (not= 1 (c-dgst-sign-init ctx ffi/null (md-fn) ffi/null pkey))
             (throw (ex-info "signature init failed" {})))
           ;; a null signature buffer asks for the maximum size rather than signing
-          (ffi/write lenp :size_t 0 0)
+          (ffi/write lenp :size_t 0)
           (when (not= 1 (c-dgst-sign ctx ffi/null lenp dp dn))
             (throw (ex-info "signature sizing failed" {})))
           (let [sigp (ffi/alloc (ffi/read lenp :size_t))]

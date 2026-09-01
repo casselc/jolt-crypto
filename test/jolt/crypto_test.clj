@@ -1,7 +1,8 @@
 (ns jolt.crypto-test
   "Drives the shims through the javax.crypto / java.security surface, exactly the
   way ring-core's session-cookie store does."
-  (:require [jolt.crypto]))
+  (:require [jolt.crypto]
+            [jolt.ffi :as ffi]))
 
 (import '[javax.crypto Cipher Mac])
 (import '[javax.crypto.spec SecretKeySpec IvParameterSpec])
@@ -133,6 +134,19 @@
            (= msg "unsupported Mac algorithm: HmacWHIRLPOOL")))
 
   ;; --- EC keys and ECDSA ----------------------------------------------------
+  ;; DER encoders and decoders pass pointers through an allocated pointer cell.
+  ;; Pin the value-first zero-offset contract independently of OpenSSL's output.
+  (let [target (ffi/alloc 1)
+        holder (ffi/alloc (ffi/sizeof :pointer))]
+    (try
+      (ffi/write target :uint8 0x5a)
+      (ffi/write holder :pointer target)
+      (check "value-first pointer holder round-trips at offset zero"
+             (= 0x5a (ffi/read (ffi/read holder :pointer) :uint8)))
+      (finally
+        (ffi/free holder)
+        (ffi/free target))))
+
   ;; A P-256 keypair encodes to the same lengths the JVM produces: 91 bytes of
   ;; X.509 SubjectPublicKeyInfo, and a PKCS#8 PrivateKeyInfo. OpenSSL's PKCS#8
   ;; carries the optional public key where the JDK's does not, so the private

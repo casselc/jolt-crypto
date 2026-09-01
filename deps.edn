@@ -1,5 +1,7 @@
 {:paths ["src"]
 
+ :jolt/min-version "0.8.0"
+
  ;; OpenSSL (libcrypto for the symmetric primitives here; libssl so dependents
  ;; that also do TLS — e.g. jolt-lang/http-client — get both from one place and
  ;; don't redeclare them). Declared :jolt/native so jolt loads them before this
