@@ -79,12 +79,37 @@
 ;; byte-array (a seq/byte-array round-trips; never the UTF-8 read/write-bytes).
 (defn- ->ba [x]
   (cond
+    ;; Already a byte array: hand it back rather than rebuilding it.
+    ;; (byte-array some-byte-array) walks the array as a seq and boxes every
+    ;; element, which is O(n) with allocation -- 13 seconds for a 52 MiB input,
+    ;; against 157 ms for the ffi/write-array that with-ptrs does next. Nothing
+    ;; downstream mutates the result, so sharing is safe.
+    (bytes? x) x
+
     (and (table? x) (#{:jolt.crypto/key :jolt.crypto/iv
                        :jolt.crypto/ec-public :jolt.crypto/ec-private
                        :jolt.crypto/x509-spec :jolt.crypto/pkcs8-spec}
                      (tget x :jolt/type)))
     (tget x :bytes)
     :else (byte-array x)))
+
+(defn- concat-bas
+  "Join byte arrays into one, by bulk copy.
+
+  The accumulator for MessageDigest/Signature update() used to be a persistent
+  vector built with (into acc (seq ba)), i.e. one BOXED element per input byte.
+  For a 52 MiB update that is 52 million boxed values retained until digest(),
+  and digest() then walked the vector again to rebuild an array. Keeping the
+  arrays themselves and copying once is the same semantics at a fraction of the
+  cost."
+  [bas]
+  (let [total (reduce + 0 (map alength bas))
+        out (byte-array total)]
+    (loop [off 0 remaining bas]
+      (if-let [b (first remaining)]
+        (do (System/arraycopy b 0 out off (alength b))
+            (recur (+ off (alength b)) (rest remaining)))
+        out))))
 
 (defn- with-ptrs
   "Alloc a C buffer per byte-array in `bas`, copy each in, run (f ptrs…), free all."
@@ -338,7 +363,7 @@
                                                    (let [[mdf len] (digest-spec algo)]
                                                      (doto (tt :jolt.crypto/md) (tput! :md mdf) (tput! :len len) (tput! :acc []))))}))
   (__register-class-methods! :jolt.crypto/md
-    {"update" (fn [self data & _] (tput! self :acc (into (tget self :acc) (seq (->ba data)))) nil)
+    {"update" (fn [self data & _] (tput! self :acc (conj (tget self :acc) (->ba data))) nil)
      "digest" (fn [self & args]
                 ;; digest(bytes) is update(bytes)-then-digest on the JVM: the
                 ;; accumulated update bytes come FIRST, not instead. Dropping
@@ -346,8 +371,8 @@
                 ;; updates with the namespace, digests with the name — hash the
                 ;; name alone.
                 (let [acc (tget self :acc)
-                      body (byte-array (if (seq args)
-                                         (into acc (seq (->ba (first args))))
+                      body (concat-bas (if (seq args)
+                                         (conj acc (->ba (first args)))
                                          acc))]
                   (tput! self :acc [])
                   (digest (tget self :md) (tget self :len) body)))
@@ -475,13 +500,14 @@
   (__register-class-methods! :jolt.crypto/signature
     {"initSign" (fn [self key & _] (tput! self :key (->ba key)) (tput! self :acc []) nil)
      "initVerify" (fn [self key & _] (tput! self :key (->ba key)) (tput! self :acc []) nil)
-     "update" (fn [self data & _] (tput! self :acc (into (tget self :acc) (seq (->ba data)))) nil)
+     ;; same accumulator fix as MessageDigest: keep the arrays, join once
+     "update" (fn [self data & _] (tput! self :acc (conj (tget self :acc) (->ba data))) nil)
      "sign" (fn [self & _]
-              (let [body (byte-array (tget self :acc))]
+              (let [body (concat-bas (tget self :acc))]
                 (tput! self :acc [])
                 (ec-sign (tget self :md) (tget self :key) body)))
      "verify" (fn [self sig & _]
-                (let [body (byte-array (tget self :acc))]
+                (let [body (concat-bas (tget self :acc))]
                   (tput! self :acc [])
                   (ec-verify (tget self :md) (tget self :key) body sig)))
      "getAlgorithm" (fn [self] (tget self :algo))})

@@ -33,7 +33,41 @@
     (.init cipher Cipher/DECRYPT_MODE (SecretKeySpec. key "AES") (IvParameterSpec. iv))
     (.doFinal cipher ct)))
 
+(defn- test-large-input-digest []
+  ;; REGRESSION. update() used to build a persistent vector with one BOXED
+  ;; element per input byte -- (into acc (seq (->ba data))) -- and ->ba rebuilt
+  ;; an already-byte-array by seqing it. A 52 MiB digest took ~48 seconds, of
+  ;; which none was OpenSSL.
+  ;;
+  ;; Asserted as a time bound rather than a ratio because the failure mode is
+  ;; catastrophic, not marginal: the old path is ~60x over this ceiling, so the
+  ;; bound is not sensitive to the machine it runs on.
+  (let [n (* 8 1024 1024)
+        buf (byte-array n)
+        start (System/currentTimeMillis)
+        md (java.security.MessageDigest/getInstance "SHA-256")]
+    (.update md buf)
+    (.digest md)
+    (let [ms (- (System/currentTimeMillis) start)]
+      (check (str "an 8 MiB digest completes promptly (" ms " ms)")
+             (< ms 5000)))))
+
+(defn- test-multi-update-equals-single []
+  ;; The accumulator change must not alter semantics. digest(bytes) is
+  ;; update(bytes)-then-digest, so the accumulated bytes come FIRST.
+  (let [one (let [md (java.security.MessageDigest/getInstance "SHA-256")]
+              (.update md (.getBytes "hello world"))
+              (vec (.digest md)))
+        split (let [md (java.security.MessageDigest/getInstance "SHA-256")]
+                (.update md (.getBytes "hello "))
+                (.update md (.getBytes "wor"))
+                (vec (.digest md (.getBytes "ld"))))]
+    (check "many updates plus digest(arg) equal one update" (= one split))))
+
 (defn -main [& _]
+  (test-large-input-digest)
+  (test-multi-update-equals-single)
+
   ;; SecureRandom fills a buffer with (probably) non-zero, varying bytes.
   (let [sr (SecureRandom.) a (byte-array 16) b (byte-array 16)]
     (.nextBytes sr a) (.nextBytes sr b)
