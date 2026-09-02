@@ -33,7 +33,33 @@
     (.init cipher Cipher/DECRYPT_MODE (SecretKeySpec. key "AES") (IvParameterSpec. iv))
     (.doFinal cipher ct)))
 
+(defn- test-large-input-digest []
+  ;; update() used to box and retain one value per byte, then digest() walked
+  ;; them all again. The fixed path is comfortably below this bound; the stock
+  ;; implementation takes many times longer for the same 16 MiB input.
+  (let [buf (byte-array (* 16 1024 1024))
+        start (System/nanoTime)
+        md (MessageDigest/getInstance "SHA-256")]
+    (.update md buf)
+    (.digest md)
+    (let [ms (/ (- (System/nanoTime) start) 1000000.0)]
+      (check (str "a 16 MiB digest completes within 5 seconds (" ms " ms)")
+             (< ms 5000.0)))))
+
+(defn- test-update-snapshots-input []
+  (let [original (.getBytes "hello world")
+        expected (.digest (MessageDigest/getInstance "SHA-256") original)
+        input (.getBytes "hello world")
+        md (MessageDigest/getInstance "SHA-256")]
+    (.update md input)
+    (aset input 0 (byte (int \H)))
+    (check "MessageDigest.update snapshots caller bytes"
+           (ba= expected (.digest md)))))
+
 (defn -main [& _]
+  (test-large-input-digest)
+  (test-update-snapshots-input)
+
   ;; SecureRandom fills a buffer with (probably) non-zero, varying bytes.
   (let [sr (SecureRandom.) a (byte-array 16) b (byte-array 16)]
     (.nextBytes sr a) (.nextBytes sr b)
@@ -161,6 +187,16 @@
       (check "signature verifies"
              (-> (doto (Signature/getInstance "SHA256withECDSA") (.initVerify pk) (.update data))
                  (.verify s)))
+      (check "Signature.update snapshots caller bytes"
+             (let [input (byte-array (map int "sign me"))
+                   signer (doto (Signature/getInstance "SHA256withECDSA")
+                            (.initSign sk)
+                            (.update input))]
+               (aset input 0 (byte (int \S)))
+               (-> (doto (Signature/getInstance "SHA256withECDSA")
+                     (.initVerify pk)
+                     (.update data))
+                   (.verify (.sign signer)))))
       (check "tampered data fails"
              (not (-> (doto (Signature/getInstance "SHA256withECDSA") (.initVerify pk)
                         (.update (byte-array (map int "sign ME"))))
