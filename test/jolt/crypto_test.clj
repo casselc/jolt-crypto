@@ -1,7 +1,8 @@
 (ns jolt.crypto-test
   "Drives the shims through the javax.crypto / java.security surface, exactly the
   way ring-core's session-cookie store does."
-  (:require [jolt.crypto]))
+  (:require [clojure.edn :as edn]
+            [jolt.crypto]))
 
 (import '[javax.crypto Cipher Mac])
 (import '[javax.crypto.spec SecretKeySpec IvParameterSpec])
@@ -21,6 +22,14 @@
 
 (def ^:private foo (byte-array (map int "foo")))
 (def ^:private k (byte-array (map int "k")))
+
+(defn- test-native-provider-selection []
+  (let [crypto (first (:jolt/native (edn/read-string (slurp "deps.edn"))))]
+    (check "macOS Intel Homebrew libcrypto precedes the unsafe system fallback"
+           (= ["/opt/homebrew/opt/openssl@3/lib/libcrypto.dylib"
+               "/usr/local/opt/openssl@3/lib/libcrypto.dylib"
+               "/usr/lib/libcrypto.dylib" "libcrypto.dylib"]
+              (:darwin crypto)))))
 
 (defn- encrypt [key data]
   (let [iv (byte-array (repeatedly 16 #(rand-int 256)))
@@ -57,6 +66,7 @@
            (ba= expected (.digest md)))))
 
 (defn -main [& _]
+  (test-native-provider-selection)
   (test-large-input-digest)
   (test-update-snapshots-input)
 
