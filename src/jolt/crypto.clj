@@ -86,6 +86,27 @@
     (tget x :bytes)
     :else (byte-array x)))
 
+(defn- as-ba [x]
+  ;; Native calls only read their input while the call is in progress. Avoid
+  ;; rebuilding an existing byte array through its boxed sequence in that case.
+  (if (bytes? x) x (->ba x)))
+
+(defn- snapshot-ba [x]
+  ;; Stateful update methods must consume the caller's bytes when update is
+  ;; called, not retain an array the caller can mutate before digest/sign.
+  (aclone (as-ba x)))
+
+(defn- concat-bas [bas]
+  "Join byte arrays with bulk copies."
+  (let [total (reduce + 0 (map alength bas))
+        out (byte-array total)]
+    (loop [off 0 remaining bas]
+      (if-let [src (first remaining)]
+        (do
+          (System/arraycopy src 0 out off (alength src))
+          (recur (+ off (alength src)) (rest remaining)))
+        out))))
+
 (defn- with-ptrs
   "Alloc a C buffer per byte-array in `bas`, copy each in, run (f ptrs…), free all."
   [bas f]
@@ -100,7 +121,7 @@
 
 ;; --- AES-CBC (PKCS5/PKCS7 padding is EVP's CBC default) ---------------------
 (defn aes-cbc [encrypt? key iv data]
-  (let [key (->ba key) iv (->ba iv) data (->ba data)
+  (let [key (as-ba key) iv (as-ba iv) data (as-ba data)
         ctx (c-ctx-new) ciph (evp-cipher-for (alength key)) inlen (alength data)]
     (with-ptrs [key iv data]
       (fn [keyp ivp inp]
@@ -118,7 +139,7 @@
 
 ;; --- HMAC -------------------------------------------------------------------
 (defn hmac [md-fn outlen key data]
-  (let [key (->ba key) data (->ba data) kl (alength key) dl (alength data)]
+  (let [key (as-ba key) data (as-ba data) kl (alength key) dl (alength data)]
     (with-ptrs [key data]
       (fn [kp dp]
         (let [mdp (ffi/alloc 64)]
@@ -127,7 +148,7 @@
 
 ;; --- digest -----------------------------------------------------------------
 (defn digest [md-fn outlen data]
-  (let [data (->ba data) dl (alength data)]
+  (let [data (as-ba data) dl (alength data)]
     (with-ptrs [data]
       (fn [dp]
         (let [mdp (ffi/alloc 64) lenp (ffi/alloc 4)]
@@ -179,7 +200,7 @@
   "Decode DER key bytes with a d2i_* parser, run (f pkey), free the key. d2i
   advances the pointer it is handed, hence the separate holder cell."
   [d2i-fn der f]
-  (let [der (->ba der) n (alength der)
+  (let [der (as-ba der) n (alength der)
         buf (ffi/alloc (max 1 n)) holder (ffi/alloc ptr-size)]
     (try
       (ffi/write-array buf der)
@@ -214,7 +235,7 @@
   [md-fn priv-der data]
   (with-der-key c-d2i-privkey priv-der
     (fn [pkey]
-      (let [data (->ba data) dn (alength data)
+      (let [data (as-ba data) dn (alength data)
             ctx (c-md-ctx-new) dp (ffi/alloc (max 1 dn)) lenp (ffi/alloc 8)]
         (try
           (ffi/write-array dp data)
@@ -237,7 +258,7 @@
   [md-fn pub-der data sig]
   (with-der-key c-d2i-pubkey pub-der
     (fn [pkey]
-      (let [data (->ba data) sig (->ba sig) dn (alength data) sn (alength sig)
+      (let [data (as-ba data) sig (as-ba sig) dn (alength data) sn (alength sig)
             ctx (c-md-ctx-new) dp (ffi/alloc (max 1 dn)) sp (ffi/alloc (max 1 sn))]
         (try
           (ffi/write-array dp data)
@@ -338,7 +359,9 @@
                                                    (let [[mdf len] (digest-spec algo)]
                                                      (doto (tt :jolt.crypto/md) (tput! :md mdf) (tput! :len len) (tput! :acc []))))}))
   (__register-class-methods! :jolt.crypto/md
-    {"update" (fn [self data & _] (tput! self :acc (into (tget self :acc) (seq (->ba data)))) nil)
+    {"update" (fn [self data & _]
+                (tput! self :acc (conj (tget self :acc) (snapshot-ba data)))
+                nil)
      "digest" (fn [self & args]
                 ;; digest(bytes) is update(bytes)-then-digest on the JVM: the
                 ;; accumulated update bytes come FIRST, not instead. Dropping
@@ -346,8 +369,8 @@
                 ;; updates with the namespace, digests with the name — hash the
                 ;; name alone.
                 (let [acc (tget self :acc)
-                      body (byte-array (if (seq args)
-                                         (into acc (seq (->ba (first args))))
+                      body (concat-bas (if (seq args)
+                                         (conj acc (as-ba (first args)))
                                          acc))]
                   (tput! self :acc [])
                   (digest (tget self :md) (tget self :len) body)))
@@ -475,13 +498,15 @@
   (__register-class-methods! :jolt.crypto/signature
     {"initSign" (fn [self key & _] (tput! self :key (->ba key)) (tput! self :acc []) nil)
      "initVerify" (fn [self key & _] (tput! self :key (->ba key)) (tput! self :acc []) nil)
-     "update" (fn [self data & _] (tput! self :acc (into (tget self :acc) (seq (->ba data)))) nil)
+     "update" (fn [self data & _]
+                (tput! self :acc (conj (tget self :acc) (snapshot-ba data)))
+                nil)
      "sign" (fn [self & _]
-              (let [body (byte-array (tget self :acc))]
+              (let [body (concat-bas (tget self :acc))]
                 (tput! self :acc [])
                 (ec-sign (tget self :md) (tget self :key) body)))
      "verify" (fn [self sig & _]
-                (let [body (byte-array (tget self :acc))]
+                (let [body (concat-bas (tget self :acc))]
                   (tput! self :acc [])
                   (ec-verify (tget self :md) (tget self :key) body sig)))
      "getAlgorithm" (fn [self] (tget self :algo))})
